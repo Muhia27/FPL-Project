@@ -117,6 +117,48 @@ players_df %>%
   head()
 
 #names(players_df)
-            
-            
+
+#Feature engineering 
+# setting player values by dividing cost by 10 
+players_df <- players_df %>%
+  mutate(
+    actual_cost = now_cost /10,
+    ppm = ifelse(total_points > 0, total_points / actual_cost, 0) #ppm(points per million)
+  )
+
+# sort top players now
+players_df %>% 
+  select(web_name, team_name, total_points, actual_cost, ppm) %>%
+  arrange(desc(ppm)) %>% # sort per ppm in descending order
+  head(20) # first 20 players
+
+# Positional Grouping players
+players_df <- players_df %>% 
+  mutate(
+    position_group = case_when(
+      position_name %in% c("GKP", "DEF") ~ "Defender/Gk",
+      position_name %in% c("MID", "FWD") ~ "Attacker",
+      TRUE ~ "Unknown"
+    )
+  )
+players_df %>%
+  count(position_name,position_group)
+
+#Play availability status
+players_df <- players_df %>%
+  mutate(
+    availability_status =case_when(
+      
+      status=="a" ~ "Available",
+      status == "i" ~ "Injured",
+      status == "d" ~ "Doubtful",
+      status == "u" ~ "Unavailable",
+      status == "s" ~ "Suspended",
+      
+      TRUE ~ "Unknown"
+    )
+  )
+
+players_df %>%
+  count(availability_status, status, sort = TRUE) #show most common first 
             

@@ -161,4 +161,63 @@ players_df <- players_df %>%
 
 players_df %>%
   count(availability_status, status, sort = TRUE) #show most common first 
-            
+
+
+#Data Aggregation and Team Level Prep
+#calculating stats for each team 
+active_squad_summary_df <- players_df %>%
+  filter(availability_status=="Available") %>%
+group_by(team_id, team_name) %>%
+  summarise(
+    #calculating the total cost of all players in the squad 
+    active_squad_cost = sum(actual_cost, na.rm = TRUE),
+    #Average ppm for each team 
+    avg_active_player_ppm = mean(ppm, na.rm=TRUE)
+  ) %>%
+  
+  ungroup()
+
+#border summary with both attacking and defensive metrics
+#calculating the average total points per player for each team
+teams_summary_df <- players_df %>%
+  group_by(team_id,team_name) %>%
+  summarise(
+    #Attacking metrics 
+    total_team_xg = sum(expected_goals, na.rm = TRUE),
+    total_team_xa =sum(expected_assists, na.rm = TRUE),
+    total_goals_scored = sum(goals_scored, na.rm = TRUE),
+  
+
+#Defensive Metrics
+total_clean_sheets = sum(clean_sheets, na.rm = TRUE),
+total_team_xgc = sum(expected_goals_conceded, na.rm = TRUE),
+
+#General Metrics
+avg_player_points=mean(total_points, na.rm=TRUE),
+avg_team_ppm=mean(ppm, na.rm=TRUE),
+total_squad_cost = sum(actual_cost, na.rm = TRUE)
+) %>%
+  ungroup() %>%
+  
+left_join(active_squad_summary_df, by= c("team_id", "team_name"))
+
+teams_summary_df %>%
+  select(team_name, total_goals_scored, total_team_xg, total_clean_sheets,
+         total_team_xgc, total_squad_cost, active_squad_cost, avg_team_ppm
+         ) %>%
+  arrange(desc(avg_team_ppm)) %>% # arrange team by team with cost effective players
+  head(20)
+
+library(lubridate) # package makes it easy to work with data and time 
+#converting deadline_time into data and time
+gameweeks_df <- gameweeks_df %>%
+  mutate(
+    deadline_time = as_datetime(deadline_time)
+    
+  )
+
+print("---Structure of the date and time conversion---")
+str(gameweeks_df)
+
+print("---Head of gameweeks_df after date conversion---")
+head(gameweeks_df)

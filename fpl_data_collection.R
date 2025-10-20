@@ -186,6 +186,8 @@ teams_summary_df <- players_df %>%
     total_team_xg = sum(expected_goals, na.rm = TRUE),
     total_team_xa =sum(expected_assists, na.rm = TRUE),
     total_goals_scored = sum(goals_scored, na.rm = TRUE),
+    
+
   
 
 #Defensive Metrics
@@ -195,7 +197,11 @@ total_team_xgc = sum(expected_goals_conceded, na.rm = TRUE),
 #General Metrics
 avg_player_points=mean(total_points, na.rm=TRUE),
 avg_team_ppm=mean(ppm, na.rm=TRUE),
-total_squad_cost = sum(actual_cost, na.rm = TRUE)
+total_squad_cost = sum(actual_cost, na.rm = TRUE),
+
+#Discipline Metrics 
+total_yellow_cards = sum(yellow_cards, na.rm = TRUE),
+total_red_cards = sum(red_cards, na.rm = TRUE)
 ) %>%
   ungroup() %>%
   
@@ -221,3 +227,185 @@ str(gameweeks_df)
 
 print("---Head of gameweeks_df after date conversion---")
 head(gameweeks_df)
+
+library(ggplot2) # Visualization Library
+
+ggplot(players_df, aes(x= actual_cost, y= total_points)) + 
+  geom_point(aes(color = position_name), alpha = 0.6) + 
+  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed") + #adds a regression line
+  labs (
+    title = "Player Cost vs Total FPL Points",
+    subtitle = "Colored by Position",
+    x = "Player Cost (£M)",
+    y = "Total Points",
+    color = "Position"
+  ) + 
+  theme_minimal()
+
+
+# Distributing of Points Per million by Position 
+ggplot(players_df, aes(x= position_name, y=ppm, fill = position_name)) +
+  geom_boxplot(alpha = 0.7) +
+  labs (
+    title = "Distribution of Player Value (ppm) by Position",
+    subtitle = "Higher median values indicate better value on average",
+    x = "Position",
+    y = "Points Per Million (PPM)",
+    fill = "position"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# make ppm rankings in consideration of highest valued players in every position 
+top_value_players_by_position <- players_df %>%
+  filter(minutes > 90) %>% 
+  group_by(position_name) %>%
+  arrange(desc(ppm)) %>%
+  slice_head(n=5)  %>% #takes top 5 rows from each group 
+  ungroup() %>%
+  select(web_name, team_name, position_name, actual_cost, total_points, ppm)
+
+print("--- Top 5 value Players (PPM) by Position ---")
+print(top_value_players_by_position, n=20 )
+
+# tier list for players based on their position 
+players_df <- players_df %>%
+  mutate(
+    price_tier = case_when(
+      #Tiers for GKs
+      position_name == "GKP" & actual_cost  <= 4.5 ~ "Budget GKP",
+      position_name == "GKP" & actual_cost > 4.5 ~ "Premium GKP",
+      
+      #Tiers for DEF
+      position_name == "DEF" & actual_cost<=4.5 ~ "Budget DEF",
+      position_name == "DEF" & actual_cost > 4.5 & actual_cost <= 5.5 ~ "Mid-Range DEF",
+      position_name == "DEF" & actual_cost >5.5 ~ "Premium DEF",
+      
+      #Tiers in Mid
+      
+      position_name == "MID" & actual_cost <= 5.5 ~ "Budget MID",
+      position_name =="MID" & actual_cost > 5.5 & actual_cost <= 7.5 ~ "Mid-Range MID",
+      position_name == "MID" & actual_cost > 7.5 ~ "Premium MID",
+      
+      #Tiers in FWDs
+      position_name == "FWD" & actual_cost <= 6.0 ~ "Budget FWD",
+      position_name =="FWD" & actual_cost > 6.0 & actual_cost <= 8.0 ~ "Mid-Range FWD",
+      position_name == "FWD" & actual_cost > 8.0 ~ "Premium FWD",
+      
+      TRUE ~ "other"
+    )
+  )
+
+#find best 3 in each tier 
+top_value_in_tiers <- players_df %>%
+  filter(minutes > 180) %>%
+  group_by(price_tier) %>%
+  arrange(desc(ppm)) %>%
+  slice_head(n=3) %>% #take top 3 from each tier 
+  ungroup() %>%
+  
+  mutate(price_tier = factor(price_tier, levels = c(
+    
+    "Premium FWD", "Mid-Range FWD", "Budget FWD",
+    "Premium MID", "Mid-Range MID", "Budget MID",
+    "Premium DEF", "Mid-Range DEF", "Budget DEF",
+    "Premium GKP",  "Budget GKP", "Other"
+    
+  ))) %>%
+  arrange(price_tier) %>%
+  select(web_name,team_name,price_tier,actual_cost,total_points,ppm)
+print("--- Top 3 value players PPM by price tier ---")
+print(top_value_in_tiers, n=42)
+
+#visualizing the tier list 
+top_player_per_tier <- top_value_in_tiers %>%
+  group_by(price_tier) %>%
+  slice_head(n=1) %>%
+  ungroup()
+
+ggplot(top_player_per_tier, aes(x = reorder(price_tier, ppm), y=ppm)) +
+  geom_col(aes(fill= substr(
+    as.character(price_tier),
+  nchar(as.character(price_tier)) -2,
+  nchar(as.character(price_tier))
+           
+)), show.legend = TRUE ) +
+  coord_flip() + 
+  labs(
+    title = "Best Player value (PPM) Found in each Price Tier",
+    subtitle = "Comparing single perfoming player from each Category",
+    x="Player Price Tier",
+    y="PPM of Top Player",
+    fill="Position"
+  ) +
+  theme_minimal()
+
+#Identifying Best Attacking and Defending teams 
+#Attacking by (xG)
+ggplot(teams_summary_df, aes(x = reorder(team_name, total_team_xg),y = 
+total_team_xg)) +
+  geom_col(aes(fill = total_team_xg), show.legend = FALSE) + 
+  coord_flip() +
+  labs(
+    title = "Team Attacking Threat (Season to Date)",
+    subtitle = "Based on sum of all players' Expected Goals (xG)",
+    x="Team",
+    y="Total Team xG"
+    
+  ) +
+  theme_minimal()
+
+
+#Best Defensive team by (xGC)
+ggplot(teams_summary_df, aes(x=reorder(team_name, -total_team_xgc),
+ y=total_team_xgc )) +
+  geom_col(aes(fill = total_team_xgc), show.legend = FALSE) +
+  coord_flip() +
+  scale_fill_gradient(low = "darkgreen",high = "red") +
+  labs(
+    title = "Teams Defensive Strength (Season to Date)",
+    subtitle = "Based on sum of all players' Expected Goals Conceded (xGC) -Lower is better",
+    x= "Team",
+    y= "Total Team xGC"
+  ) +
+  theme_minimal()
+
+# Team Discipline Analysis (Bookings)
+ggplot(teams_summary_df, aes(x=reorder(team_name, total_yellow_cards), y= total_yellow_cards)) +
+  geom_col(aes(fill = total_yellow_cards), show.legend = FALSE) + 
+  geom_text(aes(label = total_red_cards), hjust = -0.3, color = "red", size = 4) +
+#Add a red card amount
+  coord_flip() +
+  scale_fill_gradient(low = "yellow", high = "#FFD700") +
+  labs (
+    title = "Team Discipline: Total Yellow & Red Cards",
+    subtitle = "Red numbers indicate total red cards for the team",
+    x="Team",
+    y="Total Yellow Cards"
+  ) +
+  theme_minimal()
+
+#Team Strength vs PLayer Perfomance 
+teams_summary_df <- teams_summary_df %>%
+  left_join(teams_df %>% select(team_id, strength_overall_home,
+strength_overall_away), by ="team_id")
+
+ggplot(teams_summary_df, aes(x= strength_overall_home, y=avg_player_points)) +
+  geom_point(aes(color = team_name), size = 4, show.legend = FALSE) +
+  ggrepel::geom_text_repel(aes(label = team_name)) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkgrey") +
+  labs(
+    title = "Teams Strength vs Average FPL points per Player",
+    subtitle = "Does a higher team strength rating correlate with better FPL output?",
+    x="Overral Home Strength Rating",
+    y="Average FPL Points Per Player"
+  ) +
+  theme_minimal()
+
+
+
+
+
+
+
+

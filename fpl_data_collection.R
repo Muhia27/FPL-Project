@@ -180,32 +180,37 @@ group_by(team_id, team_name) %>%
 #border summary with both attacking and defensive metrics
 #calculating the average total points per player for each team
 teams_summary_df <- players_df %>%
-  group_by(team_id,team_name) %>%
+  group_by(team_id, team_name) %>%
   summarise(
-    #Attacking metrics 
+    # Attacking metrics
     total_team_xg = sum(expected_goals, na.rm = TRUE),
-    total_team_xa =sum(expected_assists, na.rm = TRUE),
+    total_team_xa = sum(expected_assists, na.rm = TRUE),
     total_goals_scored = sum(goals_scored, na.rm = TRUE),
     
-
+    # Defensive Metrics
+    total_clean_sheets = sum(clean_sheets, na.rm = TRUE),
+    total_team_xgc = sum(expected_goals_conceded, na.rm = TRUE),
+    
+    # General Metrics
+    avg_player_points = mean(total_points, na.rm = TRUE),
+    avg_team_ppm = mean(ppm, na.rm = TRUE),
+    total_squad_cost = sum(actual_cost, na.rm = TRUE),
+    
+    # Discipline Metrics
+    total_yellow_cards = sum(yellow_cards, na.rm = TRUE),
+    total_red_cards = sum(red_cards, na.rm = TRUE),
+    
+    .groups = 'drop'
+  ) %>%
   
-
-#Defensive Metrics
-total_clean_sheets = sum(clean_sheets, na.rm = TRUE),
-total_team_xgc = sum(expected_goals_conceded, na.rm = TRUE),
-
-#General Metrics
-avg_player_points=mean(total_points, na.rm=TRUE),
-avg_team_ppm=mean(ppm, na.rm=TRUE),
-total_squad_cost = sum(actual_cost, na.rm = TRUE),
-
-#Discipline Metrics 
-total_yellow_cards = sum(yellow_cards, na.rm = TRUE),
-total_red_cards = sum(red_cards, na.rm = TRUE)
-) %>%
-  ungroup() %>%
+  # Join the active squad summary
+  left_join(active_squad_summary_df, by = c("team_id", "team_name")) %>%
   
-left_join(active_squad_summary_df, by= c("team_id", "team_name"))
+  # Join the strength ratings
+  left_join(
+    teams_df %>% select(team_id, strength_attack_home, strength_attack_away, strength_defence_home, strength_defence_away),
+    by = "team_id"
+  )
 
 teams_summary_df %>%
   select(team_name, total_goals_scored, total_team_xg, total_clean_sheets,
@@ -401,11 +406,175 @@ ggplot(teams_summary_df, aes(x= strength_overall_home, y=avg_player_points)) +
     y="Average FPL Points Per Player"
   ) +
   theme_minimal()
+#  Top 20 Most Selected Players with Position
+
+players_df %>%
+  arrange(desc(selected_by_percent)) %>%
+  head(20) %>%
+  mutate(name_and_pos = paste0(web_name, " (", position_name, ")")) %>%
+  ggplot(aes(x = reorder(name_and_pos, selected_by_percent), y = selected_by_percent)) +
+  geom_col(aes(fill = team_name), show.legend = FALSE) +
+  coord_flip() +
+  labs(
+    title = "Top 20 Most Selected Players",
+    # The x-axis "Player"
+    x = "Player",
+    y = "Selected By Percent (%)"
+  ) +
+  theme_minimal()
+
+ggsave("plot_new2_top_owned.png", width = 8, height = 7)
 
 
+# Top 20 Bonus Point Magnets
+players_df %>%
+  arrange(desc(bonus)) %>%
+  head(20) %>%
+  ggplot(aes(x = reorder(web_name, bonus), y = bonus)) +
+  geom_col(aes(fill = position_name)) +
+  coord_flip() +
+  labs(
+    title = "Top 20 Bonus Point Magnets",
+    x = "Player",
+    y = "Total Bonus Points",
+    fill = "Position"
+  ) +
+  theme_minimal()
+
+ggsave("plot_new3_bonus_points.png", width = 8, height = 7)
 
 
+# Team Attack Strength vs. Total Goals Scored by the Whole Team
 
+# We can use our 'teams_summary_df' which already has total_goals_scored
+ggplot(teams_summary_df, aes(x = strength_attack_home, y = total_goals_scored)) +
+  geom_point(size = 3) +
+  ggrepel::geom_text_repel(aes(label = team_name)) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkgrey") +
+  labs(
+    title = "Team Attack Strength vs. Total Goals Scored (All Players)",
+    subtitle = "Does FPL's Attack Rating reflect a team's overall goal output?",
+    x = "Team Attack Strength Rating",
+    y = "Total Goals Scored by Team"
+  ) +
+  theme_minimal()
+
+ggsave("plot_new6_attack_strength_vs_total_goals.png", width = 8, height = 6)
+
+#  Team Defence Strength vs. Defender/GK Points
+players_df %>%
+  filter(position_group == "Defender/Gk") %>%
+  group_by(team_name) %>%
+  summarise(avg_defender_points = mean(total_points)) %>%
+  left_join(teams_df, by = "team_name") %>%
+  ggplot(aes(x = strength_defence_home, y = avg_defender_points)) +
+    geom_point(size = 3) +
+    ggrepel::geom_text_repel(aes(label = team_name)) +
+    labs(title = "Team Defence Strength vs. Average Defender/GK FPL Points", x="Team Defence Strength", y="Avg. Points for DEFs/GKPs") +
+    theme_minimal()
+
+ggsave("plot_new5_defence_strength.png", width = 8, height = 6)
+
+# --- Advanced Insight: Analyzing the Teams of the Top 100 Managers ---
+
+print("--- Starting Analysis of Top Manager Teams ---")
+
+# 1. Get the ID for the main "Overall" classic league
+overall_league_id <- 314
+print(paste("The Overall League ID is:", overall_league_id))
+
+# 2. Fetch the standings for the Overall league to get the top manager IDs
+# We will fetch Page 1 (Top 50) and Page 2 (51-100)
+top_managers_p1_url <- paste0("https://fantasy.premierleague.com/api/leagues-classic/", overall_league_id, "/standings/?page_standings=1")
+top_managers_p2_url <- paste0("https://fantasy.premierleague.com/api/leagues-classic/", overall_league_id, "/standings/?page_standings=2")
+
+top_managers_p1_raw <- fromJSON(top_managers_p1_url)
+top_managers_p2_raw <- fromJSON(top_managers_p2_url)
+
+# Combine the results from both pages into a single data frame
+top_managers_df <- rbind(top_managers_p1_raw$standings$results, top_managers_p2_raw$standings$results)
+print(paste("Successfully fetched the Top", nrow(top_managers_df), "managers."))
+
+# 3. Get the most recently completed gameweek ID
+last_gw_id <- gameweeks_df %>%
+  filter(finished == TRUE) %>%
+  pull(id) %>%
+  max()
+print(paste("Fetching team picks for the last completed Gameweek:", last_gw_id))
+
+# 4. Loop through each top manager and get their team picks
+all_top_picks <- list()
+
+# Use a for loop to go through all the top managers
+for (i in 1:nrow(top_managers_df)) {
+  manager_id <- top_managers_df$entry[i]
+  
+  # Let the user know the progress
+  print(paste("Fetching data for manager", i, "of", nrow(top_managers_df), "..."))
+  
+  picks_url <- paste0("https://fantasy.premierleague.com/api/entry/", manager_id, "/event/", last_gw_id, "/picks/")
+  
+  picks_data <- try(fromJSON(picks_url), silent = TRUE)
+  
+  if (!inherits(picks_data, "try-error")) {
+    # We store a data frame with the player ID and whether they were captain/vice-captain
+    all_top_picks[[i]] <- data.frame(
+      player_id = picks_data$picks$element,
+      is_captain = picks_data$picks$is_captain,
+      is_vice_captain = picks_data$picks$is_vice_captain
+    )
+  }
+  
+  # Add a small delay to be polite to the API (0.2 seconds is usually fine)
+  Sys.sleep(0.2)
+}
+
+# 5. Analyze the results
+# Combine the list of data frames into one big data frame
+top_picks_df <- do.call(rbind, all_top_picks)
+
+# Count the ownership of each player
+top_owned_df <- top_picks_df %>%
+  group_by(player_id) %>%
+  summarise(
+    elite_count = n(),
+    captain_count = sum(is_captain),
+    vice_captain_count = sum(is_vice_captain),
+    .groups = 'drop'
+  ) %>%
+  # Join with our main players_df to get player names and other info
+  left_join(players_df, by = "player_id") %>%
+  # Calculate ownership percentage among this elite group
+  mutate(elite_ownership_percent = (elite_count / nrow(top_managers_df)) * 100) %>%
+  arrange(desc(elite_count))
+
+# 6. View the final result!
+print("--- Most Owned Players by the Top 100 FPL Managers ---")
+top_owned_df %>%
+  select(web_name, team_name, position_name, elite_ownership_percent, selected_by_percent, captain_count) %>%
+  head(20)
+#Captaincy selection 
+top_owned_df %>%
+  select(web_name, captain_count) %>%
+  filter(captain_count > 0) %>%
+  arrange(desc(captain_count)) %>%
+  head(5)
+# Visualization for Top Manager Ownership
+top_owned_df %>%
+  head(15) %>% # Take the top 15
+  ggplot(aes(x = reorder(web_name, elite_ownership_percent), y = elite_ownership_percent)) +
+  geom_col(aes(fill = position_name)) +
+  coord_flip() +
+  labs(
+    title = "Player Ownership Among Top 100 FPL Managers",
+    subtitle = "The 'Elite Player Template'",
+    x = "Player",
+    y = "Ownership Percentage (%)",
+    fill = "Position"
+  ) +
+  theme_minimal()
+
+ggsave("plot_advanced_elite_ownership.png", width = 8, height = 7)
 
 
 
